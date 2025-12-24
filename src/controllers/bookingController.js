@@ -1,5 +1,7 @@
 import Booking from "../models/bookingModel.js";
 import Show from "../models/showModel.js";
+import User from "../models/userModel.js";
+import sendEmail from "../utils/sendEmail.js";
 import mongoose from "mongoose";
 
 
@@ -15,34 +17,104 @@ export const createBooking = async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        const show = await Show.findById(showId).session(session);
+        const show = await Show.findById(showId)
+            .populate("movieId", "title verticalImg")
+            .populate("theaterId", "name location")
+            .session(session);
+            
         if (!show) {
             await session.abortTransaction();
             session.endSession();
             return res.status(404).json({ message: "Show not found" });
         }
 
+        // Check if seats are still available
+        const unavailableSeats = [];
+        selectedSeats.forEach(seatId => {
+            const row = seatId.charCodeAt(0) - 65;
+            const col = parseInt(seatId.substring(1)) - 1;
+            if (show.seats[row] && show.seats[row][col] === "booked") {
+                unavailableSeats.push(seatId);
+            }
+        });
+
+        if (unavailableSeats.length > 0) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ 
+                message: `Seats ${unavailableSeats.join(", ")} are no longer available` 
+            });
+        }
+
+        // Create booking with confirmed status (skip online payment)
         const newBooking = new Booking({
             showId,
             userId,
-            selectedSeats: selectedSeats.map(seat => ({ seatNumber: seat, status: "pending" })),
+            selectedSeats: selectedSeats.map(seat => ({ seatNumber: seat, status: "booked" })),
             totalPrice,
-            status: "pending",
-            createdAt: new Date() // Store timestamp
+            status: "booked", // Direct confirmation - payment to be collected at theater
+            paymentStatus: "pending", // Payment pending at theater
+            paymentMethod: "theater_counter", // Payment method is theater counter
+            createdAt: new Date()
         });
 
         await newBooking.save({ session });
 
+        // Update seat availability in show
+        selectedSeats.forEach(seatId => {
+            const row = seatId.charCodeAt(0) - 65;
+            const col = parseInt(seatId.substring(1)) - 1;
+            show.seats[row][col] = "booked";
+        });
+
+        show.markModified("seats");
+        await show.save({ session });
+
+        // Add booking to user's bookings
+        await User.findByIdAndUpdate(userId, {
+            $push: { bookings: newBooking._id }
+        }).session(session);
+
         await session.commitTransaction();
         session.endSession();
 
+        // Format booking details for response and email
+        const showDateTime = new Date(show.dateTime);
+        const showDate = showDateTime.toDateString();
+        const showTime = showDateTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+        const bookingDetails = {
+            bookingId: newBooking._id,
+            movieName: show.movieId.title,
+            theaterName: show.theaterId.name,
+            poster: show.movieId.verticalImg,
+            location: show.theaterId.location,
+            showTime: showTime,
+            showDate: showDate,
+            selectedSeats: selectedSeats,
+            totalPrice: totalPrice,
+            status: "booked"
+        };
+
+        // Send booking confirmation email (existing ticket logic)
+        try {
+            const user = await User.findById(userId);
+            if (user && user.email) {
+                await sendEmail(user.email, "booking", bookingDetails);
+            }
+        } catch (emailError) {
+            console.error("Email sending failed:", emailError);
+            // Don't fail the booking if email fails
+        }
+
         res.status(201).json({
-            message: "Booking created, awaiting payment",
-            bookingId: newBooking._id
+            message: "Booking confirmed successfully! Payment can be made at the theater.",
+            booking: bookingDetails
         });
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
+        console.error("Error creating booking:", error);
         res.status(500).json({ message: "Error creating booking" });
     }
 };
@@ -73,7 +145,7 @@ export const getUserBookings = async (req, res) => {
                     { path: "theaterId", select: "name location" }
                 ]
             })
-            .select("showId selectedSeats status totalPrice createdAt")
+            .select("showId selectedSeats status paymentStatus paymentMethod totalPrice createdAt")
             .sort({ createdAt: -1 }); 
 
         if (!bookings.length) {
@@ -94,6 +166,8 @@ export const getUserBookings = async (req, res) => {
                 showTime: booking.showId.dateTime.toTimeString(),
                 bookedSeats: booking.selectedSeats.map(seat => seat.seatNumber),
                 status: booking.status,
+                paymentStatus: booking.paymentStatus || 'pending',
+                paymentMethod: booking.paymentMethod || 'theater_counter',
                 totalPrice: booking.totalPrice
             }));
 
@@ -129,3 +203,38 @@ export const getTotalBookings = async (req, res) => {
 
 
 
+
+
+// --------------mark payment as received at theater------------
+export const markPaymentReceived = async (req, res) => {
+    try {
+        const { bookingId } = req.params;
+        const userId = req.user.userId;
+
+        if (!bookingId) {
+            return res.status(400).json({ message: "Booking ID is required" });
+        }
+
+        const booking = await Booking.findById(bookingId);
+        if (!booking) {
+            return res.status(404).json({ message: "Booking not found" });
+        }
+
+        // Update payment status
+        booking.paymentStatus = "paid_at_theater";
+        await booking.save();
+
+        res.status(200).json({ 
+            message: "Payment marked as received", 
+            booking: {
+                bookingId: booking._id,
+                paymentStatus: booking.paymentStatus,
+                paymentMethod: booking.paymentMethod
+            }
+        });
+
+    } catch (error) {
+        console.error("Error marking payment as received:", error);
+        res.status(500).json({ message: "Error updating payment status" });
+    }
+};

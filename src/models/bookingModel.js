@@ -28,6 +28,16 @@ const bookingSchema = new mongoose.Schema({
         enum: ['pending', 'booked', 'cancelled'],
         default: 'pending',
     },
+    paymentStatus: {
+        type: String,
+        enum: ['pending', 'paid_online', 'paid_at_theater'],
+        default: 'pending',
+    },
+    paymentMethod: {
+        type: String,
+        enum: ['online', 'theater_counter'],
+        default: 'theater_counter',
+    },
 },
     { timestamps: true }
 );
