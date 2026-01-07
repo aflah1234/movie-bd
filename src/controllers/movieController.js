@@ -1,4 +1,5 @@
 import Movie from "../models/movieModel.js";
+import cloudinaryUpload from "../utils/cloudinaryUploader.js";
 
 
 
@@ -8,11 +9,39 @@ export const addMovie = async (req, res) => {
 
     try {
         
-        if (!title || !duration || !genre || !plot || !cast || !releaseDate || !language || !bannerImg || !verticalImg) {
-            return res.status(400).json({ message: "All fields are required" });
+        if (!title || !duration || !genre || !plot || !cast || !releaseDate || !language) {
+            return res.status(400).json({ message: "All fields except images are required" });
         }
 
-        const newMovie = new Movie({ title, duration, genre, plot, cast, releaseDate, language, bannerImg, verticalImg });
+        let finalBannerImg = bannerImg;
+        let finalVerticalImg = verticalImg;
+
+        // Handle file uploads if files are provided
+        if (req.files) {
+            if (req.files.bannerImg && req.files.bannerImg[0]) {
+                finalBannerImg = await cloudinaryUpload(req.files.bannerImg[0].path);
+            }
+            if (req.files.verticalImg && req.files.verticalImg[0]) {
+                finalVerticalImg = await cloudinaryUpload(req.files.verticalImg[0].path);
+            }
+        }
+
+        // Ensure at least one image is provided (either URL or file)
+        if (!finalBannerImg || !finalVerticalImg) {
+            return res.status(400).json({ message: "Both banner and vertical images are required (either as URL or file upload)" });
+        }
+
+        const newMovie = new Movie({ 
+            title, 
+            duration, 
+            genre, 
+            plot, 
+            cast, 
+            releaseDate, 
+            language, 
+            bannerImg: finalBannerImg, 
+            verticalImg: finalVerticalImg 
+        });
 
         await newMovie.save();
 
@@ -36,9 +65,28 @@ export const updateMovie = async(req, res) => {
 
     try {
         
+        let finalBannerImg = bannerImg;
+        let finalVerticalImg = verticalImg;
+
+        // Handle file uploads if files are provided
+        if (req.files) {
+            if (req.files.bannerImg && req.files.bannerImg[0]) {
+                finalBannerImg = await cloudinaryUpload(req.files.bannerImg[0].path);
+            }
+            if (req.files.verticalImg && req.files.verticalImg[0]) {
+                finalVerticalImg = await cloudinaryUpload(req.files.verticalImg[0].path);
+            }
+        }
+
+        const updateData = { title, duration, genre, plot, cast, releaseDate, language };
+        
+        // Only update images if new ones are provided
+        if (finalBannerImg) updateData.bannerImg = finalBannerImg;
+        if (finalVerticalImg) updateData.verticalImg = finalVerticalImg;
+
         const updatedMovie = await Movie.findByIdAndUpdate(
             movieId,
-            { title, duration, genre, plot, cast, releaseDate, language, bannerImg, verticalImg }, 
+            updateData, 
             {new: true}
         )
 
