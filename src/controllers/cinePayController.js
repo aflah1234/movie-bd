@@ -135,74 +135,98 @@ export const createCinePayTransaction = async (req, res) => {
 };
 
 export const processCinePayPayment = async (req, res) => {
+    console.log('🎬 processCinePayPayment - START');
     const session = await mongoose.startSession();
     session.startTransaction();
+    console.log('✅ Transaction started');
 
     try {
         const { transactionId, bookingId, cardDetails } = req.body;
         const userId = req.user.userId;
 
-        console.log('Processing CinePay payment:', { transactionId, bookingId });
+        console.log('📝 Processing CinePay payment:', { transactionId, bookingId, userId });
 
         if (!transactionId || !bookingId || !cardDetails) {
+            console.log('❌ Missing payment details');
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ message: "Invalid payment details" });
         }
 
+        console.log('🔍 Finding booking...');
         const booking = await Booking.findById(bookingId).session(session);
         if (!booking || booking.userId.toString() !== userId) {
+            console.log('❌ Booking not found or unauthorized');
             await session.abortTransaction();
             session.endSession();
             return res.status(404).json({ message: "Booking not found or unauthorized" });
         }
+        console.log('✅ Booking found:', booking._id);
 
+        console.log('🔍 Finding show...');
         const show = await Show.findById(booking.showId)
             .populate("movieId", "title verticalImg") 
             .populate("theaterId", "name location") 
             .session(session);
         if (!show) {
+            console.log('❌ Show not found');
             await session.abortTransaction();
             session.endSession();
             return res.status(404).json({ message: "Show not found" });
         }
+        console.log('✅ Show found:', show._id);
 
+        console.log('🔍 Finding user...');
         const user = await User.findById(userId).session(session);
+        console.log('✅ User found:', user?.email);
 
         // Process payment through CinePay
         try {
+            console.log('💳 Processing payment...');
             const paymentResult = await processPayment(booking.totalPrice, cardDetails);
-            
-            console.log('CinePay payment successful:', paymentResult);
+            console.log('✅ CinePay payment successful:', paymentResult);
 
             // Update booking status
+            console.log('📝 Updating booking status...');
             booking.status = "booked";
             booking.selectedSeats.forEach(seat => seat.status = "booked");
             await booking.save({ session });
+            console.log('✅ Booking updated');
 
             // Update payment record
+            console.log('📝 Updating payment record...');
             const payment = await Payment.findOne({ cinepay_transaction_id: transactionId }).session(session);
             if (payment) {
                 payment.status = "completed";
                 payment.cinepay_payment_response = JSON.stringify(paymentResult);
                 await payment.save({ session });
+                console.log('✅ Payment record updated');
+            } else {
+                console.log('⚠️ Payment record not found');
             }
 
             // Update seat availability
+            console.log('📝 Updating seat availability...');
             booking.selectedSeats.forEach(seat => {
                 const row = seat.seatNumber.charCodeAt(0) - 65;
                 const col = parseInt(seat.seatNumber.substring(1)) - 1;
                 show.seats[row][col] = "booked";
             });
-
             show.markModified("seats");
             await show.save({ session });
+            console.log('✅ Seats updated');
 
             // Add booking to user
+            console.log('📝 Adding booking to user...');
             await User.findByIdAndUpdate(userId, {
                 $push: { bookings: bookingId }
             }).session(session);
+            console.log('✅ User bookings updated');
 
+            console.log('💾 Committing transaction...');
             await session.commitTransaction();
             session.endSession();
+            console.log('✅ Transaction committed');
 
             // Prepare booking details for email
             const showDateTime = new Date(show.dateTime);
@@ -220,8 +244,13 @@ export const processCinePayPayment = async (req, res) => {
                 totalPrice: booking.totalPrice,
             };
 
-            console.log("CinePay payment completed successfully");
-            await sendEmail(user.email, "booking", bookingDetails);
+            console.log("✅ CinePay payment completed successfully");
+            
+            // Send email asynchronously (don't wait for it)
+            console.log('📧 Sending email asynchronously...');
+            sendEmail(user.email, "booking", bookingDetails).catch(err => {
+                console.error('⚠️ Email sending failed (non-critical):', err.message);
+            });
 
             return res.status(200).json({ 
                 message: "Payment successful, booking confirmed!",
@@ -231,6 +260,7 @@ export const processCinePayPayment = async (req, res) => {
 
         } catch (paymentError) {
             // Payment failed
+            console.error('❌ Payment processing failed:', paymentError.message);
             await session.abortTransaction();
             session.endSession();
 
@@ -250,9 +280,10 @@ export const processCinePayPayment = async (req, res) => {
         }
 
     } catch (error) {
+        console.error("❌ Error processing CinePay payment:", error);
+        console.error("Error stack:", error.stack);
         await session.abortTransaction();
         session.endSession();
-        console.error("Error processing CinePay payment:", error);
         res.status(500).json({ message: "Error processing payment", error: error.message });
     }
 };
