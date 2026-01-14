@@ -54,40 +54,55 @@ function processPayment(amount, cardDetails) {
 export const createCinePayTransaction = async (req, res) => {
     const { amount, bookingId, cardDetails } = req.body;
     
-    console.log('🎬 CinePay Transaction - Auth debug:', {
+    console.log('🎬 CinePay Transaction - Request received:', {
         hasUser: !!req.user,
         userId: req.user?.userId,
         amount,
-        bookingId
+        bookingId,
+        hasCardDetails: !!cardDetails
     });
     
     const userId = req.user.userId;
 
     try {
-        console.log('CinePay payment request received:', { amount, bookingId, userId });
+        console.log('CinePay payment request received:', { amount, bookingId, userId, cardDetails });
 
         if (!amount || !bookingId || !cardDetails) {
-            return res.status(400).json({ message: "Amount, bookingId, and card details are required" });
+            console.log('❌ Missing required fields:', { 
+                hasAmount: !!amount, 
+                hasBookingId: !!bookingId, 
+                hasCardDetails: !!cardDetails 
+            });
+            return res.status(400).json({ 
+                message: "Amount, bookingId, and card details are required",
+                missing: {
+                    amount: !amount,
+                    bookingId: !bookingId,
+                    cardDetails: !cardDetails
+                }
+            });
         }
 
         const booking = await Booking.findById(bookingId);
         if (!booking) {
-            console.log('Booking not found:', bookingId);
+            console.log('❌ Booking not found:', bookingId);
             return res.status(404).json({ message: "Booking not found" });
         }
 
         if (booking.userId.toString() !== userId) {
-            console.log('Unauthorized booking access:', { bookingUserId: booking.userId, requestUserId: userId });
+            console.log('❌ Unauthorized booking access:', { bookingUserId: booking.userId, requestUserId: userId });
             return res.status(404).json({ message: "Booking not found or unauthorized" });
         }
 
         const existingPayment = await Payment.findOne({ bookingId });
         if (existingPayment && existingPayment.status === 'completed') {
+            console.log('❌ Payment already completed:', bookingId);
             return res.status(400).json({ message: "Payment already completed for this booking" });
         }
 
         // Generate transaction ID
         const transactionId = generateTransactionId();
+        console.log('✅ Transaction ID generated:', transactionId);
 
         // Create pending payment record
         const payment = new Payment({
@@ -100,7 +115,7 @@ export const createCinePayTransaction = async (req, res) => {
         });
 
         await payment.save();
-        console.log("CinePay payment record created");
+        console.log("✅ CinePay payment record created");
 
         res.status(200).json({
             message: "Transaction initiated successfully",
@@ -109,8 +124,13 @@ export const createCinePayTransaction = async (req, res) => {
             status: "pending"
         });
     } catch (error) {
-        console.error("Error in createCinePayTransaction controller:", error);
-        res.status(error.statusCode || 500).json({ message: error.message || "Internal server error" });
+        console.error("❌ Error in createCinePayTransaction controller:", error);
+        console.error("Error details:", error.message);
+        console.error("Error stack:", error.stack);
+        res.status(error.statusCode || 500).json({ 
+            message: error.message || "Internal server error",
+            error: error.message
+        });
     }
 };
 
