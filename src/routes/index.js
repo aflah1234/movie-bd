@@ -5,7 +5,7 @@ import movieRoutes from "./movieRoutes.js"
 import theaterRoutes from "./theaterRoutes.js"
 import showRoutes from "./showRoutes.js"
 import bookingRoutes from "./bookingRoutes.js"
-import paymentRoutes from "./paymentRoutes.js"
+import cinePayRoutes from "./cinePayRoutes.js"
 import revenueRoutes from "./revenueRoutes.js"
 const router = express.Router();
 
@@ -27,8 +27,8 @@ router.use('/show',showRoutes);
 // ---Booking routes----
 router.use('/booking',bookingRoutes);
 
-// ---Payment routes----
-router.use('/payment',paymentRoutes);
+// ---CinePay Payment routes (Custom Payment Gateway)----
+router.use('/cinepay',cinePayRoutes);
 
 // ---Revenue routes----
 router.use('/revenue',revenueRoutes);

@@ -2,20 +2,25 @@ import mongoose from 'mongoose';
 
 
 const paymentSchema = new mongoose.Schema({
-    razorpay_order_id: {
+    // Payment Gateway Type
+    paymentGateway: {
         type: String,
-        required: true,
+        enum: ['cinepay'],
+        default: 'cinepay',
+        required: true
+    },
+    
+    // CinePay fields (Custom Payment Gateway)
+    cinepay_transaction_id: {
+        type: String,
         unique: true,
         sparse: true
     },
-    razorpay_payment_id: {
-        type: String,
-        unique: true,
-        sparse: true
+    cinepay_payment_response: {
+        type: String // JSON string of payment response
     },
-    razorpay_signature: {
-        type: String
-    },
+    
+    // Common fields
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

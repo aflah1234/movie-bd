@@ -46,39 +46,27 @@ export const createBooking = async (req, res) => {
             });
         }
 
-        // Create booking with confirmed status (skip online payment)
+        // Create booking with pending status (awaiting payment)
         const newBooking = new Booking({
             showId,
             userId,
-            selectedSeats: selectedSeats.map(seat => ({ seatNumber: seat, status: "booked" })),
+            selectedSeats: selectedSeats.map(seat => ({ seatNumber: seat, status: "pending" })),
             totalPrice,
-            status: "booked", // Direct confirmation - payment to be collected at theater
-            paymentStatus: "pending", // Payment pending at theater
-            paymentMethod: "theater_counter", // Payment method is theater counter
+            status: "pending", // Pending until payment is completed
+            paymentStatus: "pending",
+            paymentMethod: "cinepay",
             createdAt: new Date()
         });
 
         await newBooking.save({ session });
 
-        // Update seat availability in show
-        selectedSeats.forEach(seatId => {
-            const row = seatId.charCodeAt(0) - 65;
-            const col = parseInt(seatId.substring(1)) - 1;
-            show.seats[row][col] = "booked";
-        });
-
-        show.markModified("seats");
-        await show.save({ session });
-
-        // Add booking to user's bookings
-        await User.findByIdAndUpdate(userId, {
-            $push: { bookings: newBooking._id }
-        }).session(session);
+        // Don't update seat availability yet - wait for payment
+        // Seats will be marked as booked after successful payment
 
         await session.commitTransaction();
         session.endSession();
 
-        // Format booking details for response and email
+        // Format booking details for response
         const showDateTime = new Date(show.dateTime);
         const showDate = showDateTime.toDateString();
         const showTime = showDateTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -93,29 +81,23 @@ export const createBooking = async (req, res) => {
             showDate: showDate,
             selectedSeats: selectedSeats,
             totalPrice: totalPrice,
-            status: "booked"
+            status: "pending"
         };
 
-        // Send booking confirmation email (existing ticket logic)
-        try {
-            const user = await User.findById(userId);
-            if (user && user.email) {
-                await sendEmail(user.email, "booking", bookingDetails);
-            }
-        } catch (emailError) {
-            console.error("Email sending failed:", emailError);
-            // Don't fail the booking if email fails
-        }
-
         res.status(201).json({
-            message: "Booking confirmed successfully! Payment can be made at the theater.",
+            message: "Booking created successfully! Please complete payment.",
             booking: bookingDetails
         });
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
         console.error("Error creating booking:", error);
-        res.status(500).json({ message: "Error creating booking" });
+        console.error("Error details:", error.message);
+        console.error("Error stack:", error.stack);
+        res.status(500).json({ 
+            message: "Error creating booking",
+            error: error.message 
+        });
     }
 };
 
@@ -149,12 +131,13 @@ export const getUserBookings = async (req, res) => {
             .sort({ createdAt: -1 }); 
 
         if (!bookings.length) {
-            return res.status(404).json({ message: "No bookings found" });
+            return res.status(200).json({ message: "No bookings found", data: [] });
         }
 
 
         // ----formatted for good structure and readability----
-        const formattedBookings = bookings.filter(booking => booking.showId) // Exclude deleted shows
+        const formattedBookings = bookings
+            .filter(booking => booking.showId && booking.showId.movieId && booking.showId.theaterId) // Exclude deleted shows/movies/theaters
             .map(booking => ({
                 bookingId: booking._id,
                 movieId: booking.showId.movieId._id,
@@ -163,7 +146,7 @@ export const getUserBookings = async (req, res) => {
                 movieImage: booking.showId.movieId.verticalImg,
                 theaterName: booking.showId.theaterId.name,
                 showDate: booking.showId.dateTime.toDateString(),
-                showTime: booking.showId.dateTime.toTimeString(),
+                showTime: booking.showId.dateTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
                 bookedSeats: booking.selectedSeats.map(seat => seat.seatNumber),
                 status: booking.status,
                 paymentStatus: booking.paymentStatus || 'pending',

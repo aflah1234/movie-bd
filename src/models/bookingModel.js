@@ -35,8 +35,8 @@ const bookingSchema = new mongoose.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: ['online', 'theater_counter'],
-        default: 'theater_counter',
+        enum: ['online', 'theater_counter', 'cinepay'],
+        default: 'cinepay',
     },
 },
     { timestamps: true }
