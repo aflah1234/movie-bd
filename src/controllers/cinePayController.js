@@ -19,7 +19,7 @@ function generateTransactionId() {
 // Simulate payment processing (in real scenario, this would call your payment API)
 function processPayment(amount, cardDetails) {
     return new Promise((resolve, reject) => {
-        // Simulate API call delay
+        // Simulate API call delay (reduced for better UX)
         setTimeout(() => {
             // Simple validation
             if (!cardDetails.cardNumber || !cardDetails.cvv || !cardDetails.expiryDate) {
@@ -47,7 +47,7 @@ function processPayment(amount, cardDetails) {
                     status: 'completed'
                 });
             }
-        }, 2000); // 2 second delay to simulate processing
+        }, 500); // Reduced from 2000ms to 500ms for faster processing
     });
 }
 
